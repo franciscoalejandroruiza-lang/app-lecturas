@@ -74,3 +74,4 @@ app/
 - Si quieres, en una siguiente vuelta puedo agregar a la app: edición del
   catálogo desde la misma interfaz (sin tocar el JSON a mano), o integrarla
   como pestaña de tu dashboard de KPIs existente.
+
