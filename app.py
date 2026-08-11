@@ -43,13 +43,23 @@ if not excel_file:
     st.caption(f"Catálogo maestro cargado: {len(catalog)} equipos en {len(ubicaciones)} ubicaciones.")
     st.stop()
 
-with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-    tmp.write(excel_file.getvalue())
-    excel_path = tmp.name
+@st.cache_data(show_spinner="Leyendo y analizando el Excel (esto solo pasa una vez por archivo)...")
+def parse_excel_cached(file_bytes: bytes):
+    """Abre el Excel, detecta los bloques de mes, y precalcula las lecturas
+    de TODOS los bloques de una vez. Se cachea por contenido del archivo,
+    así que si vuelves a subir el mismo Excel no se vuelve a analizar, y
+    escribir en un campo de la interfaz ya no dispara un reanálisis completo."""
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(file_bytes)
+        path = tmp.name
+    ws = load_ok_sheet(path)
+    blocks = detect_month_blocks(ws)
+    valores_por_bloque = [read_block_values(ws, b) for b in blocks]
+    return blocks, valores_por_bloque
+
 
 try:
-    ws = load_ok_sheet(excel_path)
-    blocks = detect_month_blocks(ws)
+    blocks, valores_por_bloque = parse_excel_cached(excel_file.getvalue())
 except Exception as e:
     st.error(f"No se pudo leer el Excel: {e}")
     st.stop()
@@ -98,8 +108,8 @@ with tab_generar:
             f"{block_options[anterior_idx]}"
         )
 
-    anterior_vals = read_block_values(ws, blocks[anterior_idx])
-    actual_vals = read_block_values(ws, blocks[actual_idx]) if modo == "final" else {}
+    anterior_vals = valores_por_bloque[anterior_idx]
+    actual_vals = valores_por_bloque[actual_idx] if modo == "final" else {}
 
     st.sidebar.header("4) Formato de salida")
     formato_salida = st.sidebar.radio(
@@ -247,11 +257,15 @@ with tab_capturar:
             )
 
             st.markdown("**Vista previa del resultado calculado:**")
+
+            def _fmt(v):
+                return f"{int(v):,}" if v is not None else ""
+
             st.table({
                 "Campo": ["Carta B&N", "Oficio B&N", "Carta Color", "Oficio Color", "Digitalización"],
                 "Valor calculado": [
-                    computed["carta_bn"], computed["oficio_bn"],
-                    computed["carta_color"], computed["oficio_color"], computed["digitalizacion"],
+                    _fmt(computed["carta_bn"]), _fmt(computed["oficio_bn"]),
+                    _fmt(computed["carta_color"]), _fmt(computed["oficio_color"]), _fmt(computed["digitalizacion"]),
                 ],
             })
 
@@ -275,7 +289,10 @@ with tab_capturar:
                 target_block = None
 
             if st.button("💾 Guardar en el Excel", type="primary"):
-                wb = openpyxl.load_workbook(excel_path)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp_w:
+                    tmp_w.write(excel_file.getvalue())
+                    write_path = tmp_w.name
+                wb = openpyxl.load_workbook(write_path)
                 ws_write = wb["OK"]
 
                 if target_mode == "Crear un bloque de mes nuevo":
