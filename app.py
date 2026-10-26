@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import shutil
 import zipfile
 import tempfile
@@ -17,6 +18,17 @@ from capture_formulas import get_profile_for_model, compute_final_values, MODEL_
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 CATALOG_PATH = BASE_DIR / "data" / "catalog_final.json"
+
+def parse_suma(texto):
+    """Convierte '1234' o una suma como '15+55+14+56+23' en un entero.
+    Solo acepta dígitos, '+', espacios y comas de miles; vacío = 0."""
+    t = (texto or "").replace(",", "").replace(" ", "")
+    if not t:
+        return 0
+    if not re.fullmatch(r"\d+(\.\d+)?(\+\d+(\.\d+)?)*", t):
+        raise ValueError(texto)
+    return int(round(sum(float(x) for x in t.split("+"))))
+
 
 st.set_page_config(page_title="Lecturas ISSSTE", layout="wide")
 st.title("📋 Generador de Formatos de Lectura — ISSSTE Delegación Estatal Chihuahua")
@@ -244,10 +256,22 @@ with tab_capturar:
             st.caption("Captura los totales tal cual aparecen en el reporte de tu impresora.")
 
             raw_values = {}
+            hay_error = False
             for field_key, field_label, field_help in profile["fields"]:
-                raw_values[field_key] = st.number_input(
-                    field_label, min_value=0, step=1, key=f"raw_{field_key}", help=field_help,
+                txt = st.text_input(
+                    field_label, value="0", key=f"raw_{field_key}",
+                    help=f"{field_help} Puedes escribir una suma, ej. 15+55+14+56+23.",
                 )
+                try:
+                    raw_values[field_key] = parse_suma(txt)
+                except ValueError:
+                    st.error(f"'{field_label}': escribe un número o una suma (ej. 15+55+14).")
+                    hay_error = True
+                else:
+                    if "+" in txt:
+                        st.caption(f"= {raw_values[field_key]:,}")
+            if hay_error:
+                st.stop()
 
             computed = compute_final_values(rec["MODELO"], raw_values)
 
